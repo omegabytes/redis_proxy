@@ -4,15 +4,70 @@ services:
   app:
     image: golang:1.12.4-alpine
     volumes:
-      - .:/go/src/go-with-compose
-    working_dir: /go/src/go-with-compose
+      - .:/go/src/redis_proxy
+    working_dir: /go/src/redis_proxy
     command: go run main.go
     links:
       - redis
     environment:
-      REDIS_URL: redis:6379
+      REDIS_URL: redis:${REDIS_PORT}
+      CACHE_SIZE: ${SIZE}
+      CACHE_TTL: ${TTL}
+      PORT: ${PORT}
+      DEMO: ${DEMO}
+    env_file:
+      - .env
     ports:
-      - "8080:8080"
+      - ${PORT}:${PORT}
+    expose:
+      - ${PORT}
 
   redis:
     image: redis:alpine
+    command: redis-server --port ${REDIS_PORT}
+    environment:
+      REDIS_PORT: ${REDIS_PORT}
+    ports:
+    - ${REDIS_PORT}:6379
+    expose:
+    - ${REDIS_PORT}
+
+  tests:
+    image: node:6.9.1
+    command: bash -c "./tests.sh"
+    volumes:
+      - .:/go/src/redis_proxy
+    working_dir: /go/src/redis_proxy
+    environment:
+      PORT: ${PORT}
+    depends_on:
+      - app
+      - redis
+    links:
+      - redis
+      - app
+
+  benchmark:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    command: >
+      /bin/sh -c "
+        while ! nc -z app $PORT;
+        do
+          sleep 1;
+        done;
+        echo Connected!;
+        ab -n 500 -c 50 http://app:$PORT/v1/api/post/second;
+      "
+    volumes:
+      - .:/go/src/redis_proxy
+    working_dir: /go/src/redis_proxy
+    environment:
+      PORT: ${PORT}
+    depends_on:
+      - app
+      - redis
+    links:
+      - redis
+      - app
